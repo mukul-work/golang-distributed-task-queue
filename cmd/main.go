@@ -1,10 +1,15 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
+	"os"
 
+	"github.com/joho/godotenv"
+	"github.com/mukul-work/golang-distributed-task-queue/internal/db"
 	"github.com/mukul-work/golang-distributed-task-queue/internal/handler"
 	"github.com/mukul-work/golang-distributed-task-queue/models"
 )
@@ -35,6 +40,20 @@ func process(job models.Job) error {
 }
 
 func main() {
+
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Failed to load the environment variables")
+		return
+	}
+
+	pool, err := db.Connect(context.Background(), os.Getenv("DB_URL"))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	defer pool.Close()
+
 	queue := make(chan models.Job, 10)
 	h := handler.Handler{
 		Queue: queue,
