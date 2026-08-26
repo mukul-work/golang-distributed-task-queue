@@ -9,9 +9,9 @@ import (
 	"github.com/mukul-work/golang-distributed-task-queue/models"
 )
 
-func worker(queue <-chan models.Job) {
+func worker(id int, queue <-chan models.Job) {
 	for job := range queue {
-		fmt.Printf("Processing Job %d\n", job.Id)
+		fmt.Printf("Worker %d Processing Job %d\n", id, job.Id)
 		time.Sleep(5 * time.Second)
 	}
 }
@@ -22,7 +22,10 @@ func main() {
 		Queue: queue,
 	}
 
-	go worker(queue)
+	// start 4 workers
+	for i := 0; i < 4; i++ {
+		go worker(i, queue)
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/create", h.CreateJob)
