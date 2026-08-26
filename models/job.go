@@ -1,6 +1,8 @@
 package models
 
 type Job struct {
-	Id   int64  `json:"id"`
-	Task string `json:"task"`
+	Id          int    `json:"id"`
+	Task        string `json:"task"`
+	Attempts    int
+	MaxAttempts int `json:"maxAttempts"`
 }
