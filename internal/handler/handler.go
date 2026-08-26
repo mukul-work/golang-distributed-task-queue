@@ -13,7 +13,8 @@ type Handler struct {
 
 func (h *Handler) CreateJob(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not found", http.StatusMethodNotAllowed)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
 	}
 
 	var job models.Job
@@ -21,6 +22,7 @@ func (h *Handler) CreateJob(w http.ResponseWriter, r *http.Request) {
 	err := json.NewDecoder(r.Body).Decode(&job)
 	if err != nil {
 		http.Error(w, "Failed to parse data", http.StatusBadRequest)
+		return
 	}
 
 	h.Queue <- job
