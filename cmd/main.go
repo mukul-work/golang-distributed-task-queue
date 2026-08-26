@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/mukul-work/golang-distributed-task-queue/internal/handler"
 	"github.com/mukul-work/golang-distributed-task-queue/models"
@@ -10,7 +11,8 @@ import (
 
 func worker(queue <-chan models.Job) {
 	for job := range queue {
-		fmt.Printf("Processing Job %d", job.Id)
+		fmt.Printf("Processing Job %d\n", job.Id)
+		time.Sleep(5 * time.Second)
 	}
 }
 
