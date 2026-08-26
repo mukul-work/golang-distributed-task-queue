@@ -25,8 +25,14 @@ func (h *Handler) CreateJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.Queue <- job
+	select {
+	case h.Queue <- job:
+		w.WriteHeader(http.StatusAccepted)
+		w.Write([]byte("Job Accepted"))
+	default:
+		http.Error(w, "Queue is full", http.StatusServiceUnavailable)
+		return
 
-	w.WriteHeader(http.StatusAccepted)
+	}
 
 }
