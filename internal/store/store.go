@@ -41,7 +41,7 @@ func (s *Store) FailOrRetry(ctx context.Context, id int32) (dbgen.Job, error) {
 	return job, nil
 }
 
-func (s *Store) getPendingJobs(ctx context.Context, limit int32) ([]dbgen.Job, error) {
+func (s *Store) GetPendingJobs(ctx context.Context, limit int32) ([]dbgen.Job, error) {
 	jobs, err := s.q.GetPendingJobs(ctx, limit)
 	if err != nil {
 		return []dbgen.Job{}, fmt.Errorf("failed to fetch pending jobs: %w", err)
