@@ -1,7 +1,10 @@
+DROP TABLE IF EXISTS api_keys;
+DROP TABLE IF EXISTS jobs;
+
 CREATE TABLE jobs (
     id SERIAL PRIMARY KEY,
     task TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending', 
+    status TEXT NOT NULL DEFAULT 'pending',
     attempts INT NOT NULL DEFAULT 0,
     max_attempts INT NOT NULL DEFAULT 4,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
