@@ -8,12 +8,26 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type ApiKey struct {
+	ID         string
+	Name       string
+	KeyHash    string
+	CreatedBy  pgtype.Text
+	CreatedAt  pgtype.Timestamptz
+	ExpiresAt  pgtype.Timestamptz
+	LastUsedAt pgtype.Timestamptz
+	IsActive   bool
+}
+
 type Job struct {
-	ID          int32
-	Task        string
-	Status      string
-	Attempts    int32
-	MaxAttempts int32
-	CreatedAt   pgtype.Timestamptz
-	UpdatedAt   pgtype.Timestamptz
+	ID           string
+	Type         string
+	Payload      []byte
+	Status       string
+	Attempts     int32
+	MaxAttempts  int32
+	ErrorMessage pgtype.Text
+	ScheduledAt  pgtype.Timestamptz
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
 }

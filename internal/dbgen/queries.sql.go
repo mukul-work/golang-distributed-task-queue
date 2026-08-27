@@ -7,62 +7,283 @@ package dbgen
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const completeJob = `-- name: CompleteJob :exec
+UPDATE jobs
+SET 
+    status = 'completed',
+    updated_at = NOW()
+WHERE id = $1
+`
+
+func (q *Queries) CompleteJob(ctx context.Context, id string) error {
+	_, err := q.db.Exec(ctx, completeJob, id)
+	return err
+}
+
+const countJobsByStatus = `-- name: CountJobsByStatus :one
+SELECT COUNT(*) FROM jobs
+WHERE status = $1
+`
+
+func (q *Queries) CountJobsByStatus(ctx context.Context, status string) (int64, error) {
+	row := q.db.QueryRow(ctx, countJobsByStatus, status)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const createAPIKey = `-- name: CreateAPIKey :one
+INSERT INTO api_keys (id, name, key_hash, created_by)
+VALUES ($1, $2, $3, $4)
+RETURNING id, name, key_hash, created_by, created_at, expires_at, last_used_at, is_active
+`
+
+type CreateAPIKeyParams struct {
+	ID        string
+	Name      string
+	KeyHash   string
+	CreatedBy pgtype.Text
+}
+
+func (q *Queries) CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (ApiKey, error) {
+	row := q.db.QueryRow(ctx, createAPIKey,
+		arg.ID,
+		arg.Name,
+		arg.KeyHash,
+		arg.CreatedBy,
+	)
+	var i ApiKey
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.KeyHash,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.LastUsedAt,
+		&i.IsActive,
+	)
+	return i, err
+}
+
 const createJob = `-- name: CreateJob :one
-INSERT INTO jobs (task, max_attempts) VALUES ($1, $2) RETURNING id, task, status, attempts, max_attempts, created_at, updated_at
+INSERT INTO jobs (
+    id,
+    type,
+    payload,
+    status,
+    max_attempts
+) VALUES (
+    $1, $2, $3, $4, $5
+)
+RETURNING id, type, payload, status, attempts, max_attempts, error_message, scheduled_at, created_at, updated_at
 `
 
 type CreateJobParams struct {
-	Task        string
+	ID          string
+	Type        string
+	Payload     []byte
+	Status      string
 	MaxAttempts int32
 }
 
 func (q *Queries) CreateJob(ctx context.Context, arg CreateJobParams) (Job, error) {
-	row := q.db.QueryRow(ctx, createJob, arg.Task, arg.MaxAttempts)
+	row := q.db.QueryRow(ctx, createJob,
+		arg.ID,
+		arg.Type,
+		arg.Payload,
+		arg.Status,
+		arg.MaxAttempts,
+	)
 	var i Job
 	err := row.Scan(
 		&i.ID,
-		&i.Task,
+		&i.Type,
+		&i.Payload,
 		&i.Status,
 		&i.Attempts,
 		&i.MaxAttempts,
+		&i.ErrorMessage,
+		&i.ScheduledAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
 	return i, err
 }
 
-const failOrRetry = `-- name: FailOrRetry :one
-UPDATE jobs
-SET attempts = attempts + 1,
-    status = CASE WHEN attempts + 1 >= max_attempts THEN 'failed' ELSE 'pending' END,
-    updated_at = now()
+const deactivateAPIKey = `-- name: DeactivateAPIKey :exec
+UPDATE api_keys
+SET is_active = false
 WHERE id = $1
-RETURNING id, task, status, attempts, max_attempts, created_at, updated_at
 `
 
-func (q *Queries) FailOrRetry(ctx context.Context, id int32) (Job, error) {
-	row := q.db.QueryRow(ctx, failOrRetry, id)
+func (q *Queries) DeactivateAPIKey(ctx context.Context, id string) error {
+	_, err := q.db.Exec(ctx, deactivateAPIKey, id)
+	return err
+}
+
+const dequeueJob = `-- name: DequeueJob :one
+UPDATE jobs
+SET 
+    status = 'processing',
+    updated_at = NOW()
+WHERE id = (
+    SELECT id
+    FROM jobs
+    WHERE status = 'pending'
+        AND scheduled_at <= NOW()
+    ORDER BY scheduled_at ASC
+    LIMIT 1
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING id, type, payload, status, attempts, max_attempts, error_message, scheduled_at, created_at, updated_at
+`
+
+func (q *Queries) DequeueJob(ctx context.Context) (Job, error) {
+	row := q.db.QueryRow(ctx, dequeueJob)
 	var i Job
 	err := row.Scan(
 		&i.ID,
-		&i.Task,
+		&i.Type,
+		&i.Payload,
 		&i.Status,
 		&i.Attempts,
 		&i.MaxAttempts,
+		&i.ErrorMessage,
+		&i.ScheduledAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
 	return i, err
 }
 
-const getPendingJobs = `-- name: GetPendingJobs :many
-SELECT id, task, status, attempts, max_attempts, created_at, updated_at FROM jobs WHERE status = 'pending' ORDER BY created_at LIMIT $1
+const failJob = `-- name: FailJob :exec
+UPDATE jobs
+SET 
+    status = $2,
+    attempts = $3,
+    error_message = $4,
+    scheduled_at = $5,
+    updated_at = NOW()
+WHERE id = $1
 `
 
-func (q *Queries) GetPendingJobs(ctx context.Context, limit int32) ([]Job, error) {
-	rows, err := q.db.Query(ctx, getPendingJobs, limit)
+type FailJobParams struct {
+	ID           string
+	Status       string
+	Attempts     int32
+	ErrorMessage pgtype.Text
+	ScheduledAt  pgtype.Timestamptz
+}
+
+func (q *Queries) FailJob(ctx context.Context, arg FailJobParams) error {
+	_, err := q.db.Exec(ctx, failJob,
+		arg.ID,
+		arg.Status,
+		arg.Attempts,
+		arg.ErrorMessage,
+		arg.ScheduledAt,
+	)
+	return err
+}
+
+const getAPIKeyByHash = `-- name: GetAPIKeyByHash :one
+SELECT id, name, key_hash, created_by, created_at, expires_at, last_used_at, is_active FROM api_keys
+WHERE key_hash = $1 AND is_active = true
+`
+
+func (q *Queries) GetAPIKeyByHash(ctx context.Context, keyHash string) (ApiKey, error) {
+	row := q.db.QueryRow(ctx, getAPIKeyByHash, keyHash)
+	var i ApiKey
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.KeyHash,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.LastUsedAt,
+		&i.IsActive,
+	)
+	return i, err
+}
+
+const getJob = `-- name: GetJob :one
+SELECT id, type, payload, status, attempts, max_attempts, error_message, scheduled_at, created_at, updated_at FROM jobs
+WHERE id = $1
+`
+
+func (q *Queries) GetJob(ctx context.Context, id string) (Job, error) {
+	row := q.db.QueryRow(ctx, getJob, id)
+	var i Job
+	err := row.Scan(
+		&i.ID,
+		&i.Type,
+		&i.Payload,
+		&i.Status,
+		&i.Attempts,
+		&i.MaxAttempts,
+		&i.ErrorMessage,
+		&i.ScheduledAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const listAPIKeys = `-- name: ListAPIKeys :many
+SELECT id, name, key_hash, created_by, created_at, expires_at, last_used_at, is_active FROM api_keys
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListAPIKeys(ctx context.Context) ([]ApiKey, error) {
+	rows, err := q.db.Query(ctx, listAPIKeys)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ApiKey
+	for rows.Next() {
+		var i ApiKey
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.KeyHash,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.ExpiresAt,
+			&i.LastUsedAt,
+			&i.IsActive,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listJobs = `-- name: ListJobs :many
+SELECT id, type, payload, status, attempts, max_attempts, error_message, scheduled_at, created_at, updated_at FROM jobs
+WHERE status = $1
+ORDER BY created_at DESC
+LIMIT $2 OFFSET $3
+`
+
+type ListJobsParams struct {
+	Status string
+	Limit  int32
+	Offset int32
+}
+
+func (q *Queries) ListJobs(ctx context.Context, arg ListJobsParams) ([]Job, error) {
+	rows, err := q.db.Query(ctx, listJobs, arg.Status, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
@@ -72,10 +293,13 @@ func (q *Queries) GetPendingJobs(ctx context.Context, limit int32) ([]Job, error
 		var i Job
 		if err := rows.Scan(
 			&i.ID,
-			&i.Task,
+			&i.Type,
+			&i.Payload,
 			&i.Status,
 			&i.Attempts,
 			&i.MaxAttempts,
+			&i.ErrorMessage,
+			&i.ScheduledAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -89,30 +313,13 @@ func (q *Queries) GetPendingJobs(ctx context.Context, limit int32) ([]Job, error
 	return items, nil
 }
 
-const markDone = `-- name: MarkDone :exec
-UPDATE jobs SET status = 'done', updated_at = now() WHERE id = $1
+const updateLastUsed = `-- name: UpdateLastUsed :exec
+UPDATE api_keys
+SET last_used_at = NOW()
+WHERE id = $1
 `
 
-func (q *Queries) MarkDone(ctx context.Context, id int32) error {
-	_, err := q.db.Exec(ctx, markDone, id)
+func (q *Queries) UpdateLastUsed(ctx context.Context, id string) error {
+	_, err := q.db.Exec(ctx, updateLastUsed, id)
 	return err
-}
-
-const markProcessing = `-- name: MarkProcessing :one
-UPDATE jobs SET status = 'processing', updated_at = now() WHERE id = $1 RETURNING id, task, status, attempts, max_attempts, created_at, updated_at
-`
-
-func (q *Queries) MarkProcessing(ctx context.Context, id int32) (Job, error) {
-	row := q.db.QueryRow(ctx, markProcessing, id)
-	var i Job
-	err := row.Scan(
-		&i.ID,
-		&i.Task,
-		&i.Status,
-		&i.Attempts,
-		&i.MaxAttempts,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
 }
