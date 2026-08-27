@@ -1,4 +1,4 @@
-package job
+package store
 
 import (
 	"context"
@@ -33,35 +33,42 @@ func (s *Store) CreateJob(ctx context.Context, arg dbgen.CreateJobParams) (dbgen
 	return job, nil
 }
 
-func (s *Store) FailOrRetry(ctx context.Context, id int32) (dbgen.Job, error) {
-	job, err := s.q.FailOrRetry(ctx, id)
+func (s *Store) GetJob(ctx context.Context, id string) (dbgen.Job, error) {
+	job, err := s.q.GetJob(ctx, id)
 	if err != nil {
-		return dbgen.Job{}, fmt.Errorf("failed to execute query: %w", err)
+		return dbgen.Job{}, fmt.Errorf("unable to fetch the job with the given id: %s", id)
+
 	}
 	return job, nil
 }
 
-func (s *Store) GetPendingJobs(ctx context.Context, limit int32) ([]dbgen.Job, error) {
-	jobs, err := s.q.GetPendingJobs(ctx, limit)
+func (s *Store) DequeueJob(ctx context.Context) (dbgen.Job, error) {
+	job, err := s.q.DequeueJob(ctx)
 	if err != nil {
-		return []dbgen.Job{}, fmt.Errorf("failed to fetch pending jobs: %w", err)
-
-	}
-	return jobs, nil
-}
-
-func (s *Store) MarkDone(ctx context.Context, id int32) error {
-	err := s.q.MarkDone(ctx, id)
-	if err != nil {
-		return fmt.Errorf("job not done: %w", err)
-	}
-	return nil
-}
-
-func (s *Store) MarkProcessing(ctx context.Context, id int32) (dbgen.Job, error) {
-	job, err := s.q.MarkProcessing(ctx, id)
-	if err != nil {
-		return dbgen.Job{}, fmt.Errorf("job marked as processing: %w", err)
+		return dbgen.Job{}, fmt.Errorf("Could not dequeue job: %w", err)
 	}
 	return job, nil
+
+}
+
+func (s *Store) FailJob(ctx context.Context, arg dbgen.FailJobParams) error {
+	return s.q.FailJob(ctx, arg)
+}
+
+func (s *Store) CompletedJob(ctx context.Context, arg dbgen.FailJobParams) error {
+	return s.q.FailJob(ctx, arg)
+}
+
+func (s *Store) GetAPIKeyByHash(ctx context.Context, keyHash string) (dbgen.ApiKey, error) {
+	return s.q.GetAPIKeyByHash(ctx, keyHash)
+}
+
+func (s *Store) UpdateLastUsed(ctx context.Context, id string) error {
+	return s.q.UpdateLastUsed(ctx, id)
+}
+func (s *Store) CreateAPIKey(ctx context.Context, arg dbgen.CreateAPIKeyParams) (dbgen.ApiKey, error) {
+	return s.q.CreateAPIKey(ctx, arg)
+}
+func (s *Store) ListAPIKeys(ctx context.Context) ([]dbgen.ApiKey, error) {
+	return s.q.ListAPIKeys(ctx)
 }
