@@ -1,38 +1,76 @@
-package handler
+package internal
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"time"
 
+	"github.com/google/uuid"
+	"github.com/mukul-work/golang-distributed-task-queue/internal/dbgen"
+	"github.com/mukul-work/golang-distributed-task-queue/internal/service"
 	"github.com/mukul-work/golang-distributed-task-queue/models"
 )
 
 type Handler struct {
-	Queue chan models.Job
+	q service.Queue
 }
 
-func (h *Handler) CreateJob(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+func NewHandlerService(q service.Queue) *Handler {
+	if q == nil {
+		return nil
+	}
+	return &Handler{
+		q: q,
+	}
+}
+
+func writeJson(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(v)
+}
+
+func (h *Handler) PostJob(w http.ResponseWriter, r *http.Request) {
+
+	var req models.JobRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJson(w, http.StatusBadRequest, models.ErrorMessage{
+			Message: "Bad Request",
+			Error:   err.Error(),
+		})
 		return
 	}
 
-	var job models.Job
-
-	err := json.NewDecoder(r.Body).Decode(&job)
-	if err != nil {
-		http.Error(w, "Failed to parse data", http.StatusBadRequest)
+	if len(req.Payload) == 0 {
+		writeJson(w, http.StatusBadRequest, models.ErrorMessage{
+			Message: "Payload should not be empty",
+		})
 		return
 	}
 
-	select {
-	case h.Queue <- job:
-		w.WriteHeader(http.StatusAccepted)
-		w.Write([]byte("Job Accepted"))
-	default:
-		http.Error(w, "Queue is full", http.StatusServiceUnavailable)
-		return
-
+	id := uuid.New().String()
+	job := dbgen.Job{
+		ID:          id,
+		Type:        req.Type,
+		Payload:     req.Payload,
+		Status:      "pending",
+		MaxAttempts: 4,
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := h.q.Enqueue(ctx, job); err != nil {
+		writeJson(w, http.StatusInternalServerError, models.ErrorMessage{
+			Message: "Failed to register the job",
+			Error:   err.Error(),
+		})
+		return
+	}
+
+	writeJson(w, http.StatusOK, models.SuccessMessage{
+		Message: "Job registered successfully",
+		ID:      fmt.Sprintf("ID: %s", job.ID),
+	})
 }
